@@ -546,6 +546,7 @@ function medCardHTML(m) {
       </div>
       <div class="med-actions">
         <div class="icon-btn" onclick="editMed('${m.id}')">✏️</div>
+        ${m.pillsLeft===0 ? `<div class="icon-btn" onclick="openRestockSheet('${m.id}')" title="Ricarica scorte" style="border-color:var(--green);color:var(--green2)">🔄</div>` : ''}
         <div class="icon-btn danger" onclick="deleteMed('${m.id}')">🗑️</div>
       </div>
     </div>
@@ -703,7 +704,7 @@ function checkAlarms() {
     m.times.forEach(t => {
       if (t===hhmm && !takenToday[m.id+'_'+t]) { triggerAlert(m,t); sendNotification(m,t); }
     });
-    if (m.pillsLeft<=(m.lowAlert??3) && m.pillsLeft>0) showLowStockAlert(m);
+    if (m.pillsLeft<=(m.lowAlert??3)) showLowStockAlert(m);
   });
   updateDateBar(); renderTodaySchedule();
 }
@@ -726,13 +727,57 @@ function showLowStockAlert(med) {
   if (sessionStorage.getItem(k)) return;
   sessionStorage.setItem(k,'1');
   currentAlertData=null;
-  document.getElementById('alertIcon').textContent='⚠️';
-  document.getElementById('alertTitle').textContent='Scorte quasi esaurite!';
-  document.getElementById('alertBody').textContent=`${med.name}: rimangono solo ${med.pillsLeft} dosi.`;
-  document.getElementById('alertActions').innerHTML=
-    `<button class="alert-btn secondary" onclick="dismissAlert()">OK</button>
-     <button class="alert-btn calendar" onclick="exportOneMed('${med.id}');dismissAlert()">📅 Aggiungi promemoria</button>`;
+
+  if (med.pillsLeft <= 0) {
+    // SCORTE ESAURITE
+    document.getElementById('alertIcon').textContent='🔴';
+    document.getElementById('alertTitle').textContent='Scorte esaurite!';
+    document.getElementById('alertBody').textContent=`${med.name}: hai terminato le dosi.\nHai acquistato una nuova confezione?`;
+    document.getElementById('alertActions').innerHTML=
+      `<button class="alert-btn secondary" onclick="dismissAlert()">Non ancora</button>
+       <button class="alert-btn primary" onclick="openRestockSheet('${med.id}')">✓ Sì, ho comprato</button>`;
+  } else {
+    // SCORTE BASSE
+    document.getElementById('alertIcon').textContent='⚠️';
+    document.getElementById('alertTitle').textContent='Scorte quasi esaurite!';
+    document.getElementById('alertBody').textContent=`${med.name}: rimangono solo ${med.pillsLeft} dosi.\nRicordati di acquistarne di nuove.`;
+    document.getElementById('alertActions').innerHTML=
+      `<button class="alert-btn secondary" onclick="dismissAlert()">OK</button>
+       <button class="alert-btn primary" onclick="dismissAlert();openRestockSheet('${med.id}')">✓ Ho già comprato</button>`;
+  }
   document.getElementById('alertPopup').classList.add('show');
+}
+
+function openRestockSheet(medId) {
+  dismissAlert();
+  const m=medicines.find(x=>x.id===medId); if(!m) return;
+  document.getElementById('restockMedName').textContent = m.name;
+  document.getElementById('restockQty').value = m.totalPills;
+  document.getElementById('restockMedId').value = medId;
+  document.getElementById('restockOverlay').classList.add('open');
+}
+
+function confirmRestock() {
+  const medId=document.getElementById('restockMedId').value;
+  const qty=parseInt(document.getElementById('restockQty').value);
+  if (!qty||qty<1) { alert('Inserisci un numero valido.'); return; }
+  const m=medicines.find(x=>x.id===medId); if(!m) return;
+  m.pillsLeft=qty; m.totalPills=qty;
+  // resetta il flag scorte basse così non riappare subito
+  sessionStorage.removeItem('lowstock_'+medId+'_'+new Date().toDateString());
+  save(); renderAll();
+  document.getElementById('restockOverlay').classList.remove('open');
+  // conferma
+  document.getElementById('alertIcon').textContent='✅';
+  document.getElementById('alertTitle').textContent='Scorte aggiornate!';
+  document.getElementById('alertBody').textContent=`${m.name}: ${qty} dosi disponibili.`;
+  document.getElementById('alertActions').innerHTML=`<button class="alert-btn primary" onclick="dismissAlert()">OK</button>`;
+  document.getElementById('alertPopup').classList.add('show');
+  setTimeout(()=>dismissAlert(), 3000);
+}
+
+function restockOverlayClick(e) {
+  if(e.target.id==='restockOverlay') document.getElementById('restockOverlay').classList.remove('open');
 }
 
 function markTaken() {
@@ -970,5 +1015,32 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 </script>
+<!-- RESTOCK SHEET -->
+<div class="overlay" id="restockOverlay" onclick="restockOverlayClick(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Nuova Confezione</div>
+    <p style="color:var(--text2);font-family:var(--mono);font-size:12px;line-height:1.7;margin-bottom:20px">
+      Inserisci quante dosi contiene la nuova confezione di<br>
+      <strong style="color:var(--text);font-size:14px" id="restockMedName"></strong>
+    </p>
+    <input type="hidden" id="restockMedId">
+    <div class="field">
+      <label>Numero dosi nella nuova confezione *</label>
+      <input type="number" id="restockQty" min="1" placeholder="Es: 30">
+      <div class="field-hint">Le scorte verranno reimpostate a questo valore</div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-cancel" onclick="document.getElementById('restockOverlay').classList.remove('open')">Annulla</button>
+      <button class="btn-save" onclick="confirmRestock()" style="background:var(--green)">✓ Conferma ricarica</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Anche dal med-card: bottone ricarica manuale
+function manualRestock(medId) { openRestockSheet(medId); }
+</script>
+
 </body>
 </html>
